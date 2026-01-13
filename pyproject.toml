@@ -1,0 +1,41 @@
+[build-system]
+build-backend = "hatchling.build"
+
+requires = [ "hatchling" ]
+
+[project]
+name = "es-query-toolkit"
+version = "0.2.0"
+description = "Elasticsearch Query Building and Transformation Toolkit"
+readme = "README.md"
+keywords = [ "dsl", "elasticsearch", "lucene", "query", "search" ]
+license = { text = "MIT" }
+authors = [
+  { name = "HACK-WU" },
+]
+requires-python = ">=3.11"
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+  "elasticsearch-dsl>=7,<9",
+  "luqum>=0.11",
+]
+
+[dependency-groups]
+dev = [
+  "pip>=25.3",
+  "pre-commit>=4.5.1",
+  "pytest>=7",
+  "pytest-cov>=4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [ "src/es_query_toolkit" ]
