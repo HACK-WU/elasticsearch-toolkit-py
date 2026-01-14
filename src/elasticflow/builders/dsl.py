@@ -1,5 +1,7 @@
 """DSL 查询构建器模块."""
 
+from __future__ import annotations
+
 from typing import Any
 from collections.abc import Callable
 
@@ -72,7 +74,7 @@ class DslQueryBuilder:
         self._aggregations: list[dict] = []
         self._extra_filters: list[Q] = []
 
-    def conditions(self, conditions: list[dict]) -> "DslQueryBuilder":
+    def conditions(self, conditions: list[dict]) -> DslQueryBuilder:
         """
         设置过滤条件.
 
@@ -85,7 +87,7 @@ class DslQueryBuilder:
         self._conditions = self._field_mapper.transform_condition_fields(conditions)
         return self
 
-    def query_string(self, query_string: str) -> "DslQueryBuilder":
+    def query_string(self, query_string: str | None) -> DslQueryBuilder:
         """
         设置 Query String.
 
@@ -95,10 +97,10 @@ class DslQueryBuilder:
         Returns:
             self，支持链式调用
         """
-        self._query_string = query_string
+        self._query_string = query_string or ""
         return self
 
-    def ordering(self, ordering: list[str]) -> "DslQueryBuilder":
+    def ordering(self, ordering: list[str]) -> DslQueryBuilder:
         """
         设置排序.
 
@@ -111,22 +113,22 @@ class DslQueryBuilder:
         self._ordering = self._field_mapper.transform_ordering_fields(ordering)
         return self
 
-    def pagination(self, page: int = 1, page_size: int = 10) -> "DslQueryBuilder":
+    def pagination(self, page: int = 1, page_size: int = 10) -> DslQueryBuilder:
         """
         设置分页.
 
         Args:
-            page: 页码
-            page_size: 每页大小
+            page: 页码，最小为 1
+            page_size: 每页大小，最小为 1
 
         Returns:
             self，支持链式调用
         """
-        self._page = page
-        self._page_size = page_size
+        self._page = max(1, page)
+        self._page_size = max(1, page_size)
         return self
 
-    def add_filter(self, q: Q) -> "DslQueryBuilder":
+    def add_filter(self, q: Q | None) -> DslQueryBuilder:
         """
         添加额外的过滤条件.
 
@@ -136,7 +138,8 @@ class DslQueryBuilder:
         Returns:
             self，支持链式调用
         """
-        self._extra_filters.append(q)
+        if q is not None:
+            self._extra_filters.append(q)
         return self
 
     def add_aggregation(
@@ -145,24 +148,27 @@ class DslQueryBuilder:
         agg_type: str,
         field: str | None = None,
         **kwargs: Any,
-    ) -> "DslQueryBuilder":
+    ) -> DslQueryBuilder:
         """
         添加聚合.
 
         Args:
             name: 聚合名称
             agg_type: 聚合类型
-            field: 字段名
+            field: 字段名（会自动转换为 ES 字段名）
             **kwargs: 其他聚合参数
 
         Returns:
             self，支持链式调用
         """
+        es_field = (
+            self._field_mapper.get_es_field(field, for_agg=True) if field else None
+        )
         self._aggregations.append(
             {
                 "name": name,
                 "type": agg_type,
-                "field": field,
+                "field": es_field,
                 "kwargs": kwargs,
             }
         )
@@ -246,7 +252,10 @@ class DslQueryBuilder:
         return search
 
     def _apply_aggregations(self, search: Search) -> Search:
-        """应用聚合."""
+        """应用聚合.
+
+        注意: search.aggs.bucket() 是原地修改，不需要重新赋值
+        """
         for agg in self._aggregations:
             if agg["field"]:
                 search.aggs.bucket(
@@ -259,6 +268,17 @@ class DslQueryBuilder:
                 search.aggs.bucket(agg["name"], agg["type"], **agg["kwargs"])
 
         return search
+
+    def clear(self) -> DslQueryBuilder:
+        """清空所有查询参数."""
+        self._conditions.clear()
+        self._query_string = ""
+        self._ordering.clear()
+        self._page = 1
+        self._page_size = 10
+        self._aggregations.clear()
+        self._extra_filters.clear()
+        return self
 
     def to_dict(self) -> dict[str, Any]:
         """
