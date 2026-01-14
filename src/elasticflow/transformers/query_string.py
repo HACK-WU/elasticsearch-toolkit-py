@@ -1,6 +1,6 @@
 """Query String 转换器模块."""
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from elasticflow.exceptions import QueryStringParseError
 
@@ -34,8 +34,8 @@ class QueryStringTransformer:
 
     def __init__(
         self,
-        field_mapping: Optional[Dict[str, str]] = None,
-        value_translations: Optional[Dict[str, List[Tuple[Any, str]]]] = None,
+        field_mapping: dict[str, str] | None = None,
+        value_translations: dict[str, list[tuple[Any, str]]] | None = None,
     ):
         """
         初始化转换器.
@@ -93,14 +93,14 @@ class _LuqumTreeTransformer(TreeTransformer):
 
     def __init__(
         self,
-        field_mapping: Dict[str, str],
-        value_translations: Dict[str, List[Tuple[Any, str]]],
+        field_mapping: dict[str, str],
+        value_translations: dict[str, list[tuple[Any, str]]],
     ):
         super().__init__()
         self._field_mapping = field_mapping
         self._value_translations = value_translations
 
-    def visit_search_field(self, node: SearchField, context: Dict) -> Any:
+    def visit_search_field(self, node: SearchField, context: dict) -> Any:
         """访问搜索字段节点，进行字段名映射."""
         if context.get("ignore_search_field"):
             yield from self.generic_visit(node, context)
@@ -118,7 +118,7 @@ class _LuqumTreeTransformer(TreeTransformer):
                 },
             )
 
-    def visit_word(self, node: Word, context: Dict) -> Any:
+    def visit_word(self, node: Word, context: dict) -> Any:
         """访问词节点，进行值翻译."""
         if context.get("ignore_word"):
             yield from self.generic_visit(node, context)

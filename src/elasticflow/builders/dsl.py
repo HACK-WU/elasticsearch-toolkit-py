@@ -1,6 +1,7 @@
 """DSL 查询构建器模块."""
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
+from collections.abc import Callable
 
 from elasticsearch.dsl import Q, Search
 
@@ -44,9 +45,9 @@ class DslQueryBuilder:
     def __init__(
         self,
         search_factory: Callable[[], Search],
-        field_mapper: Optional[FieldMapper] = None,
-        condition_parser: Optional[ConditionParser] = None,
-        query_string_transformer: Optional[Callable[[str], str]] = None,
+        field_mapper: FieldMapper | None = None,
+        condition_parser: ConditionParser | None = None,
+        query_string_transformer: Callable[[str], str] | None = None,
     ):
         """
         初始化构建器.
@@ -63,15 +64,15 @@ class DslQueryBuilder:
         self._query_string_transformer = query_string_transformer
 
         # 查询参数
-        self._conditions: List[Dict] = []
+        self._conditions: list[dict] = []
         self._query_string: str = ""
-        self._ordering: List[str] = []
+        self._ordering: list[str] = []
         self._page: int = 1
         self._page_size: int = 10
-        self._aggregations: List[Dict] = []
-        self._extra_filters: List[Q] = []
+        self._aggregations: list[dict] = []
+        self._extra_filters: list[Q] = []
 
-    def conditions(self, conditions: List[Dict]) -> "DslQueryBuilder":
+    def conditions(self, conditions: list[dict]) -> "DslQueryBuilder":
         """
         设置过滤条件.
 
@@ -97,7 +98,7 @@ class DslQueryBuilder:
         self._query_string = query_string
         return self
 
-    def ordering(self, ordering: List[str]) -> "DslQueryBuilder":
+    def ordering(self, ordering: list[str]) -> "DslQueryBuilder":
         """
         设置排序.
 
@@ -142,7 +143,7 @@ class DslQueryBuilder:
         self,
         name: str,
         agg_type: str,
-        field: Optional[str] = None,
+        field: str | None = None,
         **kwargs: Any,
     ) -> "DslQueryBuilder":
         """
@@ -259,7 +260,7 @@ class DslQueryBuilder:
 
         return search
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         导出为字典格式的 DSL.
 

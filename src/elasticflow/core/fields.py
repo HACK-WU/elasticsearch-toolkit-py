@@ -1,7 +1,6 @@
 """字段映射模块."""
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 
 @dataclass
@@ -10,7 +9,7 @@ class QueryField:
 
     field: str  # 前端字段名
     es_field: str  # ES 实际字段名
-    es_field_for_agg: Optional[str] = None  # 聚合时使用的字段名
+    es_field_for_agg: str | None = None  # 聚合时使用的字段名
     display: str = ""  # 显示名称
     is_char: bool = False  # 是否为字符类型（用于聚合结果处理）
 
@@ -24,14 +23,14 @@ class QueryField:
 class FieldMapper:
     """字段映射器."""
 
-    def __init__(self, fields: Optional[List[QueryField]] = None):
+    def __init__(self, fields: list[QueryField] | None = None):
         """
         初始化字段映射器.
 
         Args:
             fields: 字段配置列表
         """
-        self._fields: Dict[str, QueryField] = {f.field: f for f in (fields or [])}
+        self._fields: dict[str, QueryField] = {f.field: f for f in (fields or [])}
 
     def get_es_field(self, field: str, for_agg: bool = False) -> str:
         """
@@ -48,7 +47,7 @@ class FieldMapper:
             return self._fields[field].get_es_field(for_agg)
         return field
 
-    def transform_condition_fields(self, conditions: List[Dict]) -> List[Dict]:
+    def transform_condition_fields(self, conditions: list[dict]) -> list[dict]:
         """
         转换条件中的字段名.
 
@@ -66,7 +65,7 @@ class FieldMapper:
             result.append(new_cond)
         return result
 
-    def transform_ordering_fields(self, ordering: List[str]) -> List[str]:
+    def transform_ordering_fields(self, ordering: list[str]) -> list[str]:
         """
         转换排序字段.
 

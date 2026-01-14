@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from elasticsearch.dsl import Q
 
@@ -21,7 +21,7 @@ class ConditionParser(ABC):
     """条件解析器抽象基类."""
 
     @abstractmethod
-    def parse(self, condition: ConditionItem) -> Optional[Q]:
+    def parse(self, condition: ConditionItem) -> Q | None:
         """
         解析条件为 Q 对象.
 
@@ -37,7 +37,7 @@ class ConditionParser(ABC):
 class DefaultConditionParser(ConditionParser):
     """默认条件解析器."""
 
-    def parse(self, condition: ConditionItem) -> Optional[Q]:
+    def parse(self, condition: ConditionItem) -> Q | None:
         """
         解析条件为 Q 对象.
 
