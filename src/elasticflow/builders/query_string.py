@@ -1,10 +1,13 @@
 """Query String 构建器模块."""
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
-from elasticflow.core.constants import QueryStringCharacters
 from elasticflow.core.operators import GroupRelation, LogicOperator, QueryStringOperator
+from elasticflow.core.utils import escape_query_string
 from elasticflow.exceptions import UnsupportedOperatorError
+
+if TYPE_CHECKING:
+    from elasticflow.core.query import Q
 
 
 class QueryStringBuilder:
@@ -42,7 +45,7 @@ class QueryStringBuilder:
 
     def __init__(
         self,
-        operator_mapping: Optional[Dict[str, QueryStringOperator]] = None,
+        operator_mapping: dict[str, QueryStringOperator] | None = None,
         logic_operator: LogicOperator = LogicOperator.AND,
     ):
         """
@@ -52,7 +55,8 @@ class QueryStringBuilder:
             operator_mapping: 自定义操作符映射，将外部操作符名映射到 QueryStringOperator
             logic_operator: 条件之间的逻辑关系，默认 AND
         """
-        self._filters: List[Dict[str, Any]] = []
+        self._filters: list[dict[str, Any]] = []
+        self._raw_queries: list[str] = []  # 存储原生 Query String
         self._operator_mapping = operator_mapping or {}
         self._logic_operator = logic_operator
 
@@ -60,23 +64,27 @@ class QueryStringBuilder:
         self,
         field: str,
         operator: QueryStringOperator | str,
-        values: List[Any],
-        is_wildcard: bool = False,
+        values: list[Any] | Any,
         group_relation: GroupRelation = GroupRelation.OR,
     ) -> "QueryStringBuilder":
         """
         添加过滤条件.
 
+        所有值会自动进行转义处理，防止 Query String 注入。
+
         Args:
             field: 字段名
             operator: 操作符
             values: 值列表
-            is_wildcard: 值中是否包含通配符（*、?），如果是则不转义
             group_relation: 多个值之间的逻辑关系
 
         Returns:
             self，支持链式调用
         """
+
+        if not isinstance(values, list):
+            values = [values]
+
         # 操作符映射
         if not isinstance(operator, QueryStringOperator):
             operator = self._operator_mapping.get(operator, QueryStringOperator.EQUAL)
@@ -86,10 +94,56 @@ class QueryStringBuilder:
                 "field": field,
                 "operator": operator,
                 "values": values,
-                "is_wildcard": is_wildcard,
                 "group_relation": group_relation,
             }
         )
+        return self
+
+    def add_raw(self, raw_query: str) -> "QueryStringBuilder":
+        """
+        添加原生 Query String.
+
+        原生查询字符串不进行任何转义处理，直接添加到查询条件中。
+        适用于需要直接使用 Elasticsearch Query String 语法的场景。
+
+        Args:
+            raw_query: 原生 Query String 字符串
+
+        Returns:
+            self，支持链式调用
+
+        示例:
+            builder.add_raw("status: error AND level: >=3")
+        """
+        # 忽略空值
+        if raw_query is None or (isinstance(raw_query, str) and not raw_query.strip()):
+            return self
+
+        self._raw_queries.append(raw_query.strip())
+        return self
+
+    def add_q(self, q: "Q") -> "QueryStringBuilder":
+        """
+        添加 Q 对象查询条件.
+
+        将 Q 对象构建的查询字符串作为条件添加到构建器中。
+
+        Args:
+            q: Q 对象
+
+        Returns:
+            self，支持链式调用
+
+        示例:
+            builder.add_q(Q(status__equal="error") | Q(level__gte=3))
+        """
+        if q is None or q.is_empty():
+            return self
+
+        query_str = q.build()
+        if query_str:
+            self._raw_queries.append(query_str)
+
         return self
 
     def build(self) -> str:
@@ -106,11 +160,14 @@ class QueryStringBuilder:
                 field=f["field"],
                 operator=f["operator"],
                 values=f["values"],
-                is_wildcard=f["is_wildcard"],
                 group_relation=f["group_relation"],
             )
             if query_part:
                 query_parts.append(query_part)
+
+        # 添加原生 Query String，用括号包裹以确保优先级
+        for raw_query in self._raw_queries:
+            query_parts.append(f"({raw_query})")
 
         return f" {self._logic_operator.value} ".join(query_parts)
 
@@ -118,8 +175,7 @@ class QueryStringBuilder:
         self,
         field: str,
         operator: QueryStringOperator,
-        values: List[Any],
-        is_wildcard: bool,
+        values: list[Any],
         group_relation: GroupRelation,
     ) -> str:
         """构建单个过滤条件."""
@@ -144,7 +200,9 @@ class QueryStringBuilder:
         if not values:
             return ""
 
-        processed_values = self._process_values(values, operator, is_wildcard)
+        processed_values = self._process_values(values, operator)
+        if not processed_values:
+            return ""
 
         # 对于范围操作符和正则表达式，只使用第一个值，不需要多值组合
         if operator in (
@@ -172,11 +230,10 @@ class QueryStringBuilder:
 
     def _process_values(
         self,
-        values: List[Any],
+        values: list[Any],
         operator: QueryStringOperator,
-        is_wildcard: bool,
-    ) -> List[str]:
-        """处理值列表."""
+    ) -> list[str]:
+        """处理值列表，所有值默认进行转义."""
         result = []
 
         for value in values:
@@ -184,32 +241,29 @@ class QueryStringBuilder:
                 QueryStringOperator.INCLUDE,
                 QueryStringOperator.NOT_INCLUDE,
             ):
-                # 模糊匹配，添加通配符
-                processed = self._escape_value(str(value), is_wildcard)
-                result.append(f"*{processed}*")
+                # 去除通配符
+                value = str(value).strip("*")
+                if value == "":
+                    continue
+                # 模糊匹配，转义后直接返回（模板中已包含通配符）
+                escaped = escape_query_string(value)
+                escaped = f"*{escaped}*"
             elif operator in (QueryStringOperator.EQUAL, QueryStringOperator.NOT_EQUAL):
-                # 精确匹配，添加双引号
+                # 精确匹配，添加双引号（只需转义双引号）
                 escaped = str(value).replace('"', '\\"')
-                result.append(f'"{escaped}"')
+                escaped = f'"{escaped}"'
+            elif operator in (QueryStringOperator.REG, QueryStringOperator.NREG):
+                # 正则表达式操作符，不转义
+                escaped = str(value)
             else:
-                # 其他操作符（GT, GTE, LT, LTE, REG, NREG 等），直接输出值
-                result.append(str(value))
+                # 其他操作符（GT, GTE, LT, LTE 等），转义值
+                escaped = escape_query_string(str(value))
 
+            result.append(escaped)
         return result
-
-    def _escape_value(self, value: str, preserve_wildcard: bool) -> str:
-        """转义特殊字符."""
-        result = []
-        for char in value:
-            if preserve_wildcard and char in QueryStringCharacters.WILDCARD_CHARACTERS:
-                result.append(char)
-            elif char in QueryStringCharacters.ES_RESERVED_CHARACTERS:
-                result.append(f"\\{char}")
-            else:
-                result.append(char)
-        return "".join(result)
 
     def clear(self) -> "QueryStringBuilder":
         """清空所有过滤条件."""
         self._filters.clear()
+        self._raw_queries.clear()
         return self

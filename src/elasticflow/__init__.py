@@ -28,8 +28,10 @@ from elasticflow.core import (
     FieldMapper,
     GroupRelation,
     LogicOperator,
+    Q,
     QueryField,
     QueryStringOperator,
+    escape_query_string,
 )
 
 # 导出异常
@@ -59,6 +61,8 @@ __all__ = [
     "ConditionItem",
     "ConditionParser",
     "DefaultConditionParser",
+    "Q",
+    "escape_query_string",
     # 异常
     "EsQueryToolkitError",
     "QueryStringParseError",

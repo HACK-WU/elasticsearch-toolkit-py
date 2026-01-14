@@ -8,6 +8,8 @@ from elasticflow.core.conditions import (
 from elasticflow.core.constants import QueryStringCharacters, QueryStringLogicOperators
 from elasticflow.core.fields import FieldMapper, QueryField
 from elasticflow.core.operators import GroupRelation, LogicOperator, QueryStringOperator
+from elasticflow.core.query import Q
+from elasticflow.core.utils import escape_query_string
 
 __all__ = [
     "QueryStringCharacters",
@@ -20,4 +22,6 @@ __all__ = [
     "DefaultConditionParser",
     "QueryField",
     "FieldMapper",
+    "Q",
+    "escape_query_string",
 ]
