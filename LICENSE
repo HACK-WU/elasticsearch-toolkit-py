@@ -14,6 +14,3 @@ This project contains modified code from BLUEKING-MONITOR 蓝鲸智云-监控平
 Original Copyright (C) 2023 THL A29 Limited, a Tencent company. All rights reserved.
 Original license: MIT License
 
-Modifications:
-- Removed dependencies on BlueKing platform
-- Refactored for generic Django REST Framework use
