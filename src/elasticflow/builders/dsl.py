@@ -74,6 +74,7 @@ class DslQueryBuilder:
         self._page: int = 1
         self._page_size: int = 10
         self._aggregations: list[dict] = []
+        self._raw_aggregations: list[dict] = []  # 原始聚合 DSL
         self._extra_filters: list[Q] = []
 
     def conditions(self, conditions: list[dict]) -> DslQueryBuilder:
@@ -144,11 +145,31 @@ class DslQueryBuilder:
             self._extra_filters.append(q)
         return self
 
+    def _validate_aggregation_name(self, name: str) -> None:
+        """
+        验证聚合名称是否有效.
+
+        Args:
+            name: 聚合名称
+
+        Raises:
+            ValueError: 聚合名称无效时抛出
+        """
+        if not name:
+            raise ValueError("聚合名称不能为空")
+        if not isinstance(name, str):
+            raise ValueError("聚合名称必须是字符串")
+        # 聚合名称不能包含特殊字符
+        for char in ['"', ".", " "]:
+            if char in name:
+                raise ValueError(f"聚合名称不能包含字符: {char}")
+
     def add_aggregation(
         self,
         name: str,
         agg_type: str,
         field: str | None = None,
+        sub_aggregations: list[dict] | None = None,
         **kwargs: Any,
     ) -> DslQueryBuilder:
         """
@@ -156,13 +177,49 @@ class DslQueryBuilder:
 
         Args:
             name: 聚合名称
-            agg_type: 聚合类型
+            agg_type: 聚合类型，支持:
+                - terms: 分组聚合
+                - avg/sum/min/max: 基础指标聚合
+                - stats: 统计聚合（返回 count, min, max, avg, sum）
+                - extended_stats: 扩展统计（额外返回 variance, std_deviation 等）
+                - cardinality: 去重计数
+                - percentiles: 百分位数
+                - value_count: 值计数
+                - top_hits: Top K 文档（配合 size, sort, _source 使用）
             field: 字段名（会自动转换为 ES 字段名）
+            sub_aggregations: 子聚合列表，每项格式同 add_aggregation 的参数
             **kwargs: 其他聚合参数
 
         Returns:
             self，支持链式调用
+
+        Raises:
+            ValueError: 聚合名称无效时抛出
+
+        示例:
+            # 基础聚合
+            builder.add_aggregation("status_count", "terms", field="status", size=10)
+
+            # 统计聚合
+            builder.add_aggregation("price_stats", "stats", field="price")
+
+            # 百分位数聚合
+            builder.add_aggregation("latency_pct", "percentiles", field="latency", percents=[50, 90, 99])
+
+            # Top K 聚合（获取每个分组的前3条记录）
+            builder.add_aggregation(
+                "by_status", "terms", field="status", size=10,
+                sub_aggregations=[{
+                    "name": "top_docs",
+                    "type": "top_hits",
+                    "size": 3,
+                    "sort": [{"create_time": "desc"}],
+                    "_source": ["id", "title", "create_time"],
+                }]
+            )
         """
+        self._validate_aggregation_name(name)
+
         es_field = (
             self._field_mapper.get_es_field(field, for_agg=True) if field else None
         )
@@ -172,8 +229,172 @@ class DslQueryBuilder:
                 "type": agg_type,
                 "field": es_field,
                 "kwargs": kwargs,
+                "sub_aggregations": sub_aggregations,
             }
         )
+        return self
+
+    def add_stats_aggregation(
+        self,
+        name: str,
+        field: str,
+        extended: bool = False,
+    ) -> DslQueryBuilder:
+        """
+        添加统计聚合（简便方法）.
+
+        Args:
+            name: 聚合名称
+            field: 字段名
+            extended: 是否使用扩展统计（包含方差、标准差等）
+
+        Returns:
+            self，支持链式调用
+
+        示例:
+            # 基础统计
+            builder.add_stats_aggregation("price_stats", "price")
+            # 结果: {count, min, max, avg, sum}
+
+            # 扩展统计
+            builder.add_stats_aggregation("price_stats", "price", extended=True)
+            # 结果: {count, min, max, avg, sum, variance, std_deviation, ...}
+        """
+        agg_type = "extended_stats" if extended else "stats"
+        return self.add_aggregation(name, agg_type, field=field)
+
+    def add_cardinality_aggregation(
+        self,
+        name: str,
+        field: str,
+        precision_threshold: int = 3000,
+    ) -> DslQueryBuilder:
+        """
+        添加去重计数聚合（简便方法）.
+
+        Args:
+            name: 聚合名称
+            field: 字段名
+            precision_threshold: 精度阈值（默认3000，越高越精确但内存消耗越大）
+
+        Returns:
+            self，支持链式调用
+
+        示例:
+            builder.add_cardinality_aggregation("unique_users", "user_id")
+        """
+        return self.add_aggregation(
+            name, "cardinality", field=field, precision_threshold=precision_threshold
+        )
+
+    def add_percentiles_aggregation(
+        self,
+        name: str,
+        field: str,
+        percents: list[float] | None = None,
+    ) -> DslQueryBuilder:
+        """
+        添加百分位数聚合（简便方法）.
+
+        Args:
+            name: 聚合名称
+            field: 字段名
+            percents: 百分位列表，默认 [1, 5, 25, 50, 75, 95, 99]
+
+        Returns:
+            self，支持链式调用
+
+        示例:
+            builder.add_percentiles_aggregation("latency_pct", "response_time", percents=[50, 90, 95, 99])
+        """
+        kwargs = {}
+        if percents:
+            kwargs["percents"] = percents
+        return self.add_aggregation(name, "percentiles", field=field, **kwargs)
+
+    def add_top_hits_aggregation(
+        self,
+        name: str,
+        size: int = 3,
+        sort: list[dict] | None = None,
+        source: list[str] | bool | None = None,
+    ) -> DslQueryBuilder:
+        """
+        添加 Top Hits 聚合（简便方法）.
+
+        注意:
+        - 作为根聚合时：返回整个查询结果的前 N 条记录（等同于 size 参数）
+        - 作为子聚合时：返回每个分组桶的前 N 条记录（这才是典型的 Top K 用法）
+        - 通常应该作为子聚合使用，例如配合 terms/aggs 使用
+
+        Args:
+            name: 聚合名称
+            size: 返回文档数量，默认 3
+            sort: 排序规则，如 [{"create_time": "desc"}]
+            source: 返回字段，如 ["id", "title"] 或 False 表示不返回源
+
+        Returns:
+            self，支持链式调用
+
+        示例:
+            # ❌ 独立使用：只返回前5条（等同于 pagination size）
+            builder.add_top_hits_aggregation("latest", size=5, sort=[{"create_time": "desc"}])
+
+            # ✅ 作为子聚合使用：每个状态的前3条记录
+            builder.add_aggregation(
+                "by_status", "terms", field="status",
+                sub_aggregations=[{
+                    "name": "latest",
+                    "type": "top_hits",
+                    "size": 3,
+                    "sort": [{"create_time": "desc"}],
+                }]
+            )
+        """
+        kwargs: dict[str, Any] = {"size": size}
+        if sort:
+            kwargs["sort"] = sort
+        if source is not None:
+            kwargs["_source"] = source
+        return self.add_aggregation(name, "top_hits", **kwargs)
+
+    def add_aggregation_raw(self, agg_dict: dict) -> DslQueryBuilder:
+        """
+        添加原始聚合 DSL.
+
+        用于添加复杂的聚合配置，直接传入聚合 DSL 字典.
+
+        Args:
+            agg_dict: 聚合 DSL 字典，格式如 {"agg_name": {"agg_type": {...}}}
+
+        Returns:
+            self，支持链式调用
+
+        示例:
+            # 日期直方图聚合
+            builder.add_aggregation_raw({
+                "events_over_time": {
+                    "date_histogram": {
+                        "field": "timestamp",
+                        "calendar_interval": "1d",
+                    },
+                    "aggs": {
+                        "avg_value": {"avg": {"field": "value"}}
+                    }
+                }
+            })
+
+            # 过滤器聚合
+            builder.add_aggregation_raw({
+                "error_count": {
+                    "filter": {"term": {"level": "error"}},
+                    "aggs": {
+                        "count": {"value_count": {"field": "_id"}}
+                    }
+                }
+            })
+        """
+        self._raw_aggregations.append(agg_dict)
         return self
 
     def build(self) -> Search:
@@ -303,17 +524,79 @@ class DslQueryBuilder:
         注意: search.aggs.bucket() 是原地修改，不需要重新赋值
         """
         for agg in self._aggregations:
-            if agg["field"]:
-                search.aggs.bucket(
-                    agg["name"],
-                    agg["type"],
-                    field=agg["field"],
-                    **agg["kwargs"],
-                )
-            else:
-                search.aggs.bucket(agg["name"], agg["type"], **agg["kwargs"])
+            self._apply_single_aggregation(search.aggs, agg)
+
+        # 应用原始聚合 DSL
+        for raw_agg in self._raw_aggregations:
+            self._apply_raw_aggregation(search, raw_agg)
 
         return search
+
+    def _apply_single_aggregation(self, parent_aggs: Any, agg: dict) -> None:
+        """
+        应用单个聚合（支持子聚合递归）.
+
+        Args:
+            parent_aggs: 父聚合对象
+            agg: 聚合配置
+        """
+        name = agg["name"]
+        agg_type = agg["type"]
+        field = agg.get("field")
+        kwargs = agg.get("kwargs", {})
+        sub_aggregations = agg.get("sub_aggregations")
+
+        # 处理 top_hits 特殊参数
+        if agg_type == "top_hits":
+            # top_hits 不需要 field 参数
+            agg_obj = parent_aggs.bucket(name, agg_type, **kwargs)
+        elif field:
+            agg_obj = parent_aggs.bucket(name, agg_type, field=field, **kwargs)
+        else:
+            agg_obj = parent_aggs.bucket(name, agg_type, **kwargs)
+
+        # 递归处理子聚合
+        if sub_aggregations:
+            for sub_agg in sub_aggregations:
+                # 将子聚合配置标准化
+                sub_field = sub_agg.get("field")
+                # 对子聚合字段也进行映射转换
+                if sub_field:
+                    es_sub_field = self._field_mapper.get_es_field(
+                        sub_field, for_agg=True
+                    )
+                else:
+                    es_sub_field = None
+
+                sub_agg_config = {
+                    "name": sub_agg.get("name"),
+                    "type": sub_agg.get("type"),
+                    "field": es_sub_field,
+                    "kwargs": {
+                        k: v
+                        for k, v in sub_agg.items()
+                        if k not in ("name", "type", "field", "sub_aggregations")
+                    },
+                    "sub_aggregations": sub_agg.get("sub_aggregations"),
+                }
+                self._apply_single_aggregation(agg_obj, sub_agg_config)
+
+    def _apply_raw_aggregation(self, search: Search, raw_agg: dict) -> None:
+        """
+        应用原始聚合 DSL.
+
+        Args:
+            search: Search 对象
+            raw_agg: 原始聚合 DSL
+        """
+        # 获取当前查询 DSL
+        current_dict = search.to_dict()
+        # 合并聚合，避免覆盖其他查询参数
+        aggs = current_dict.get("aggs", {})
+        aggs.update(raw_agg)
+        # 使用 update_from_dict 传入完整 DSL，避免覆盖 query/sort/size 等
+        current_dict["aggs"] = aggs
+        search.update_from_dict(current_dict)
 
     def clear(self) -> DslQueryBuilder:
         """清空所有查询参数."""
@@ -323,6 +606,7 @@ class DslQueryBuilder:
         self._page = 1
         self._page_size = 10
         self._aggregations.clear()
+        self._raw_aggregations.clear()
         self._extra_filters.clear()
         return self
 
