@@ -9,6 +9,8 @@ from elasticsearch.dsl import Q, Search
 
 from elasticflow.core.conditions import (
     ConditionItem,
+    ConditionGroup,
+    NestedCondition,
     ConditionParser,
     DefaultConditionParser,
 )
@@ -214,14 +216,58 @@ class DslQueryBuilder:
         combined_q = None
 
         for cond in self._conditions:
-            condition_item = ConditionItem(
-                key=cond["key"],
-                method=cond.get("method", "eq"),
-                value=cond["value"],
-                condition=cond.get("condition", "and"),
-            )
+            # 支持多种条件类型
+            cond_type = cond.get("type", "item")
 
-            q = self._condition_parser.parse(condition_item)
+            try:
+                if cond_type == "item":
+                    # 普通条件
+                    if "key" not in cond or "value" not in cond:
+                        # 跳过无效条件
+                        continue
+
+                    condition_item = ConditionItem(
+                        key=cond["key"],
+                        method=cond.get("method", "eq"),
+                        value=cond["value"],
+                        condition=cond.get("condition", "and"),
+                    )
+                    q = self._condition_parser.parse(condition_item)
+
+                elif cond_type == "group":
+                    # 条件组（逻辑嵌套）
+                    condition_group = ConditionGroup(
+                        condition=cond.get("condition", "and"),
+                        children=cond.get("children", []),
+                        minimum_should_match=cond.get("minimum_should_match"),
+                    )
+                    q = self._condition_parser.parse_group(condition_group)
+
+                elif cond_type == "nested":
+                    # nested 条件（ES Nested 类型）
+                    if "path" not in cond:
+                        # 跳过无效条件
+                        continue
+
+                    nested_condition = NestedCondition(
+                        path=cond["path"],
+                        condition=cond.get("condition", "and"),
+                        children=cond.get("children", []),
+                        score_mode=cond.get("score_mode"),
+                        minimum_should_match=cond.get("minimum_should_match"),
+                        inner_hits=cond.get("inner_hits"),
+                    )
+                    q = self._condition_parser.parse_nested(nested_condition)
+
+                else:
+                    # 未知类型，跳过
+                    continue
+
+            except (KeyError, ValueError):
+                # 跳过无效条件，继续处理其他条件
+                # 在生产环境中应该记录日志
+                continue
+
             if q is None:
                 continue
 

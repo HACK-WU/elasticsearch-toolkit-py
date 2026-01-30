@@ -2,6 +2,8 @@
 
 from elasticflow.core.conditions import (
     ConditionItem,
+    ConditionGroup,
+    NestedCondition,
     ConditionParser,
     DefaultConditionParser,
 )
@@ -18,6 +20,8 @@ __all__ = [
     "GroupRelation",
     "QueryStringOperator",
     "ConditionItem",
+    "ConditionGroup",
+    "NestedCondition",
     "ConditionParser",
     "DefaultConditionParser",
     "QueryField",

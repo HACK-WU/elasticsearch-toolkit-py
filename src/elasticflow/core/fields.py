@@ -57,13 +57,50 @@ class FieldMapper:
         Returns:
             转换后的条件列表
         """
-        result = []
-        for cond in conditions:
+
+        def _transform_single(cond: dict) -> dict:
+            """转换单个条件."""
+            # 验证必需字段
+            if "key" not in cond:
+                # 缺少 key 字段，返回原条件
+                return cond
+
             new_cond = cond.copy()
             new_cond["origin_key"] = cond["key"]
             new_cond["key"] = self.get_es_field(cond["key"])
-            result.append(new_cond)
-        return result
+            return new_cond
+
+        def _transform_group(group_dict: dict) -> dict:
+            """转换条件组."""
+            new_group = group_dict.copy()
+            if "children" in new_group:
+                new_group["children"] = [
+                    _transform_condition(child) for child in new_group["children"]
+                ]
+            return new_group
+
+        def _transform_nested(nested_dict: dict) -> dict:
+            """转换 nested 条件."""
+            new_nested = nested_dict.copy()
+            # nested 的 path 不需要转换，但内部条件需要转换
+            if "children" in new_nested:
+                new_nested["children"] = [
+                    _transform_condition(child) for child in new_nested["children"]
+                ]
+            return new_nested
+
+        def _transform_condition(cond: dict) -> dict:
+            """递归转换条件."""
+            cond_type = cond.get("type", "item")
+
+            if cond_type == "group":
+                return _transform_group(cond)
+            elif cond_type == "nested":
+                return _transform_nested(cond)
+            else:
+                return _transform_single(cond)
+
+        return [_transform_condition(cond) for cond in conditions]
 
     def transform_ordering_fields(self, ordering: list[str]) -> list[str]:
         """
