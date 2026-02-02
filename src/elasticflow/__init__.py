@@ -6,6 +6,7 @@
     - QueryStringBuilder: 构建 Query String 查询
     - DslQueryBuilder: 构建完整的 ES DSL 查询
     - QueryStringTransformer: 转换和处理 Query String
+    - ResponseParser: 解析 ES 查询结果
 
 使用示例:
     from elasticflow import QueryStringBuilder, QueryStringOperator
@@ -15,7 +16,7 @@
     query_string = builder.build()
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 # 导出构建器
 from elasticflow.builders import DslQueryBuilder, SubAggregation, QueryStringBuilder
@@ -45,6 +46,20 @@ from elasticflow.exceptions import (
 # 导出转换器
 from elasticflow.transformers import QueryStringTransformer
 
+# 导出解析器
+from elasticflow.parsers import (
+    ResponseParser,
+    DataCleaner,
+    NullHandling,
+    PagedResponse,
+    HighlightedHit,
+    TermsBucket,
+    StatsResult,
+    PercentilesResult,
+    CardinalityResult,
+    SuggestionItem,
+)
+
 __all__ = [
     # 版本
     "__version__",
@@ -71,4 +86,15 @@ __all__ = [
     "UnsupportedOperatorError",
     # 转换器
     "QueryStringTransformer",
+    # 解析器
+    "ResponseParser",
+    "DataCleaner",
+    "NullHandling",
+    "PagedResponse",
+    "HighlightedHit",
+    "TermsBucket",
+    "StatsResult",
+    "PercentilesResult",
+    "CardinalityResult",
+    "SuggestionItem",
 ]

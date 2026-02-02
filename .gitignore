@@ -137,3 +137,4 @@ env.bak/
 venv.bak/
 arms_cache/
 uv.lock
+.codebuddy
