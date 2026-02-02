@@ -9,6 +9,7 @@
 - 百分位数 (percentiles)
 - Top K 文档 (top_hits)
 - 子聚合 (sub_aggregations)
+- 子聚合类方式 (SubAggregation)
 - 原始聚合 DSL (add_aggregation_raw)
 """
 
@@ -16,7 +17,7 @@ import json
 
 from elasticsearch.dsl import Search
 
-from elasticflow import DslQueryBuilder, FieldMapper, QueryField
+from elasticflow import DslQueryBuilder, FieldMapper, QueryField, SubAggregation
 
 
 def create_builder() -> DslQueryBuilder:
@@ -244,6 +245,42 @@ def example_nested_sub_aggregations():
     print_dsl("多层子聚合 - 每个状态的统计信息和最贵记录", dsl)
 
 
+def example_sub_aggregations_with_class():
+    """使用 SubAggregation 类的子聚合示例 - 类型安全的方式."""
+    builder = create_builder()
+
+    search = builder.add_aggregation(
+        "by_status",
+        "terms",
+        field="status",
+        size=10,
+        sub_aggregations=[
+            SubAggregation(
+                name="latest_docs",
+                type="top_hits",
+                kwargs={
+                    "size": 3,
+                    "sort": [{"create_time": "desc"}],
+                    "_source": ["id", "title", "status", "create_time"],
+                },
+            ),
+            SubAggregation(
+                name="avg_price",
+                type="avg",
+                field="price",
+            ),
+            SubAggregation(
+                name="doc_count",
+                type="value_count",
+                field="_id",
+            ),
+        ],
+    ).build()
+
+    dsl = search.to_dict()
+    print_dsl("子聚合 - 使用 SubAggregation 类（类型安全）", dsl)
+
+
 # ============================================================
 # 7. 原始聚合 DSL 示例
 # ============================================================
@@ -365,6 +402,7 @@ if __name__ == "__main__":
     # 6. 子聚合
     example_sub_aggregations()
     example_nested_sub_aggregations()
+    example_sub_aggregations_with_class()
 
     # 7. 原始聚合 DSL
     example_raw_date_histogram()

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import dataclasses
+import logging
 from typing import Any
 from collections.abc import Callable
 
 from elasticsearch.dsl import Q, Search
+
+# 模块级别日志记录器
+logger = logging.getLogger(__name__)
 
 from elasticflow.core.conditions import (
     ConditionItem,
@@ -15,6 +20,57 @@ from elasticflow.core.conditions import (
     DefaultConditionParser,
 )
 from elasticflow.core.fields import FieldMapper
+
+
+@dataclasses.dataclass
+class SubAggregation:
+    """
+    子聚合配置类.
+
+    用于类型安全地定义子聚合，替代字典方式，提供 IDE 自动补全支持.
+
+    Attributes:
+        name: 聚合名称
+        type: 聚合类型（如 "terms", "top_hits", "avg" 等）
+        field: 字段名，会被 FieldMapper 转换为 ES 字段名
+        kwargs: 其他聚合参数
+        sub_aggregations: 嵌套的子聚合列表
+
+    示例:
+        # 使用类方式（推荐）
+        SubAggregation(
+            name="latest_docs",
+            type="top_hits",
+            size=3,
+            sort=[{"create_time": "desc"}],
+        )
+
+        # 等价于字典方式（兼容）
+        {"name": "latest_docs", "type": "top_hits", "size": 3, ...}
+    """
+
+    name: str
+    type: str  # noqa: A003
+    field: str | None = None
+    kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
+    sub_aggregations: list[SubAggregation] = dataclasses.field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """转换为字典格式，兼容现有代码.
+
+        展平所有 kwargs 参数到顶层，这样 _apply_single_aggregation
+        可以直接使用，无需嵌套 kwargs 键.
+        """
+        # 基础字段（_apply_single_aggregation 会处理）
+        result: dict[str, Any] = {
+            "name": self.name,
+            "type": self.type,
+            "field": self.field,
+            "sub_aggregations": [sub.to_dict() for sub in self.sub_aggregations],
+            # 展平 kwargs 到顶层，这样 bucket() 可以直接使用
+            **self.kwargs,
+        }
+        return result
 
 
 class DslQueryBuilder:
@@ -122,13 +178,17 @@ class DslQueryBuilder:
 
         Args:
             page: 页码，最小为 1
-            page_size: 每页大小，最小为 1
+            page_size: 每页大小，最小为 0（设为 0 时只返回聚合结果，不返回文档）
 
         Returns:
             self，支持链式调用
+
+        示例:
+            # 只获取聚合结果，不返回文档
+            builder.pagination(page=1, page_size=0)
         """
         self._page = max(1, page)
-        self._page_size = max(1, page_size)
+        self._page_size = max(0, page_size)  # 允许 0，用于只返回聚合结果
         return self
 
     def add_filter(self, q: Q | None) -> DslQueryBuilder:
@@ -154,22 +214,29 @@ class DslQueryBuilder:
 
         Raises:
             ValueError: 聚合名称无效时抛出
+
+        说明:
+            ES 聚合名称不能包含以下字符：
+            - 双引号 ("): JSON 解析问题
+            - 点号 (.): ES 使用点号作为字段路径分隔符
+            - 空格 ( ): 避免 URL 编码问题
         """
         if not name:
             raise ValueError("聚合名称不能为空")
         if not isinstance(name, str):
             raise ValueError("聚合名称必须是字符串")
-        # 聚合名称不能包含特殊字符
-        for char in ['"', ".", " "]:
+        # 聚合名称不能包含特殊字符（ES 限制）
+        invalid_chars = {'"': "双引号", ".": "点号", " ": "空格"}
+        for char, char_name in invalid_chars.items():
             if char in name:
-                raise ValueError(f"聚合名称不能包含字符: {char}")
+                raise ValueError(f"聚合名称不能包含{char_name}: '{char}'")
 
     def add_aggregation(
         self,
         name: str,
         agg_type: str,
         field: str | None = None,
-        sub_aggregations: list[dict] | None = None,
+        sub_aggregations: list[dict | SubAggregation] | None = None,
         **kwargs: Any,
     ) -> DslQueryBuilder:
         """
@@ -187,7 +254,7 @@ class DslQueryBuilder:
                 - value_count: 值计数
                 - top_hits: Top K 文档（配合 size, sort, _source 使用）
             field: 字段名（会自动转换为 ES 字段名）
-            sub_aggregations: 子聚合列表，每项格式同 add_aggregation 的参数
+            sub_aggregations: 子聚合列表，可以是字典或 SubAggregation 对象
             **kwargs: 其他聚合参数
 
         Returns:
@@ -206,7 +273,7 @@ class DslQueryBuilder:
             # 百分位数聚合
             builder.add_aggregation("latency_pct", "percentiles", field="latency", percents=[50, 90, 99])
 
-            # Top K 聚合（获取每个分组的前3条记录）
+            # Top K 聚合（字典方式，向后兼容）
             builder.add_aggregation(
                 "by_status", "terms", field="status", size=10,
                 sub_aggregations=[{
@@ -214,8 +281,20 @@ class DslQueryBuilder:
                     "type": "top_hits",
                     "size": 3,
                     "sort": [{"create_time": "desc"}],
-                    "_source": ["id", "title", "create_time"],
                 }]
+            )
+
+            # Top K 聚合（SubAggregation 类方式，推荐）
+            builder.add_aggregation(
+                "by_status", "terms", field="status", size=10,
+                sub_aggregations=[
+                    SubAggregation(
+                        name="top_docs",
+                        type="top_hits",
+                        size=3,
+                        sort=[{"create_time": "desc"}],
+                    )
+                ]
             )
         """
         self._validate_aggregation_name(name)
@@ -223,13 +302,21 @@ class DslQueryBuilder:
         es_field = (
             self._field_mapper.get_es_field(field, for_agg=True) if field else None
         )
+        # 将 SubAggregation 对象转换为字典
+        normalized_sub_aggs = None
+        if sub_aggregations:
+            normalized_sub_aggs = [
+                sub.to_dict() if isinstance(sub, SubAggregation) else sub
+                for sub in sub_aggregations
+            ]
+
         self._aggregations.append(
             {
                 "name": name,
                 "type": agg_type,
                 "field": es_field,
                 "kwargs": kwargs,
-                "sub_aggregations": sub_aggregations,
+                "sub_aggregations": normalized_sub_aggs,
             }
         )
         return self
@@ -422,6 +509,7 @@ class DslQueryBuilder:
 
         # 添加分页
         start = (self._page - 1) * self._page_size
+        # 当 page_size=0 时，仍然需要调用切片，这样 ES 会返回聚合结果但返回 0 条文档
         search = search[start : start + self._page_size]
 
         # 添加聚合
@@ -484,9 +572,9 @@ class DslQueryBuilder:
                     # 未知类型，跳过
                     continue
 
-            except (KeyError, ValueError):
-                # 跳过无效条件，继续处理其他条件
-                # 在生产环境中应该记录日志
+            except (KeyError, ValueError) as e:
+                # 记录无效条件，便于生产环境排查问题
+                logger.warning(f"跳过无效条件: {cond}, 错误: {e}")
                 continue
 
             if q is None:
@@ -543,7 +631,13 @@ class DslQueryBuilder:
         name = agg["name"]
         agg_type = agg["type"]
         field = agg.get("field")
+        # 支持 kwargs 字典或顶层直接展平的参数
         kwargs = agg.get("kwargs", {})
+        if not kwargs:
+            # 如果没有 kwargs 键，从顶层获取除保留键外的所有参数
+            reserved_keys = {"name", "type", "field", "sub_aggregations", "kwargs"}
+            kwargs = {k: v for k, v in agg.items() if k not in reserved_keys}
+
         sub_aggregations = agg.get("sub_aggregations")
 
         # 处理 top_hits 特殊参数

@@ -18,7 +18,7 @@
 __version__ = "0.3.0"
 
 # 导出构建器
-from elasticflow.builders import DslQueryBuilder, QueryStringBuilder
+from elasticflow.builders import DslQueryBuilder, SubAggregation, QueryStringBuilder
 
 # 导出核心组件
 from elasticflow.core import (
@@ -51,6 +51,7 @@ __all__ = [
     # 构建器
     "QueryStringBuilder",
     "DslQueryBuilder",
+    "SubAggregation",
     # 操作符和枚举
     "QueryStringOperator",
     "LogicOperator",

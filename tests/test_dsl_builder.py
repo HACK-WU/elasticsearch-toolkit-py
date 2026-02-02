@@ -74,6 +74,20 @@ class TestDslQueryBuilder:
         search_mock.__getitem__.assert_called_with(slice(20, 40))
         assert result == search_mock
 
+    def test_pagination_with_zero_page_size(self):
+        """测试 page_size=0 只返回聚合结果."""
+        search_mock = MagicMock(spec=Search)
+        search_mock.filter.return_value = search_mock
+        search_mock.sort.return_value = search_mock
+        search_mock.__getitem__.return_value = search_mock
+
+        builder = DslQueryBuilder(search_factory=lambda: search_mock)
+        builder.pagination(page=1, page_size=0)
+        result = builder.build()
+
+        search_mock.__getitem__.assert_called_with(slice(0, 0))
+        assert result == search_mock
+
     def test_field_mapping(self):
         """测试字段映射."""
         fields = [
@@ -405,6 +419,49 @@ class TestAggregations:
         # 验证子聚合被调用
         assert bucket_result_mock.bucket.called
 
+    def test_add_aggregation_with_subaggregation_class(self):
+        """测试使用 SubAggregation 类带子聚合的聚合."""
+        from elasticflow import SubAggregation
+
+        search_mock = MagicMock(spec=Search)
+        search_mock.filter.return_value = search_mock
+        search_mock.sort.return_value = search_mock
+        search_mock.__getitem__.return_value = search_mock
+
+        aggs_mock = MagicMock()
+        bucket_result_mock = MagicMock()
+        aggs_mock.bucket.return_value = bucket_result_mock
+        bucket_result_mock.bucket.side_effect = [MagicMock(), MagicMock()]
+        search_mock.aggs = aggs_mock
+
+        builder = DslQueryBuilder(search_factory=lambda: search_mock)
+        builder.add_aggregation(
+            "by_status",
+            "terms",
+            field="status",
+            size=10,
+            sub_aggregations=[
+                SubAggregation(
+                    name="latest_docs",
+                    type="top_hits",
+                    field=None,
+                    kwargs={},
+                ),
+                SubAggregation(
+                    name="avg_price",
+                    type="avg",
+                    field="price",
+                    kwargs={},
+                ),
+            ],
+        )
+        builder.build()
+
+        # 验证主聚合被调用
+        assert aggs_mock.bucket.called
+        # 验证两个子聚合都被调用
+        assert bucket_result_mock.bucket.call_count == 2
+
     def test_add_aggregation_raw(self):
         """测试原始聚合 DSL."""
         search_mock = MagicMock(spec=Search)
@@ -485,7 +542,7 @@ class TestAggregations:
         search_mock = MagicMock(spec=Search)
         builder = DslQueryBuilder(search_factory=lambda: search_mock)
 
-        with pytest.raises(ValueError, match="聚合名称不能包含字符"):
+        with pytest.raises(ValueError, match="聚合名称不能包含双引号"):
             builder.add_aggregation('agg "test"', "terms", field="status")
 
     def test_raw_aggregation_does_not_overwrite_query_params(self):
