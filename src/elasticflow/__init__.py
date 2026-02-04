@@ -60,6 +60,30 @@ from elasticflow.parsers import (
     SuggestionItem,
 )
 
+# 导出批量操作工具
+from elasticflow.bulk import (
+    BulkAction,
+    BulkErrorItem,
+    BulkOperation,
+    BulkOperationTool,
+    BulkResult,
+)
+
+# 导出索引管理器
+from elasticflow.index_manager import (
+    IndexManager,
+    IndexInfo,
+    AliasInfo,
+    IndexTemplateInfo,
+    ILMPolicyInfo,
+    ILMPhase,
+    ILMIndexStatus,
+    RolloverInfo,
+    IndexSettings,
+    MappingProperty,
+    IndexMappings,
+)
+
 __all__ = [
     # 版本
     "__version__",
@@ -97,4 +121,22 @@ __all__ = [
     "PercentilesResult",
     "CardinalityResult",
     "SuggestionItem",
+    # 批量操作工具
+    "BulkAction",
+    "BulkErrorItem",
+    "BulkOperation",
+    "BulkOperationTool",
+    "BulkResult",
+    # 索引管理器
+    "IndexManager",
+    "IndexInfo",
+    "AliasInfo",
+    "IndexTemplateInfo",
+    "ILMPolicyInfo",
+    "ILMPhase",
+    "ILMIndexStatus",
+    "RolloverInfo",
+    "IndexSettings",
+    "MappingProperty",
+    "IndexMappings",
 ]
