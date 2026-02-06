@@ -84,6 +84,20 @@ from elasticflow.index_manager import (
     IndexMappings,
 )
 
+# 导出查询分析器
+from elasticflow.query_analyzer import (
+    QueryAnalyzer,
+    QueryAnalysis,
+    QuerySuggestion,
+    QueryOptimizationType,
+    QueryProfile,
+    ProfileShard,
+    SlowQueryInfo,
+    SeverityLevel,
+    RuleEngine,
+    OptimizationRule,
+)
+
 __all__ = [
     # 版本
     "__version__",
@@ -139,4 +153,15 @@ __all__ = [
     "IndexSettings",
     "MappingProperty",
     "IndexMappings",
+    # 查询分析器
+    "QueryAnalyzer",
+    "QueryAnalysis",
+    "QuerySuggestion",
+    "QueryOptimizationType",
+    "QueryProfile",
+    "ProfileShard",
+    "SlowQueryInfo",
+    "SeverityLevel",
+    "RuleEngine",
+    "OptimizationRule",
 ]
