@@ -98,6 +98,14 @@ from elasticflow.query_analyzer import (
     OptimizationRule,
 )
 
+# 导出时间范围查询工具
+from elasticflow.time_range import (
+    TimeRangeQueryTool,
+    TimeRange,
+    TimeRangeType,
+    QuickTimeRange,
+)
+
 __all__ = [
     # 版本
     "__version__",
@@ -164,4 +172,9 @@ __all__ = [
     "SeverityLevel",
     "RuleEngine",
     "OptimizationRule",
+    # 时间范围查询工具
+    "TimeRangeQueryTool",
+    "TimeRange",
+    "TimeRangeType",
+    "QuickTimeRange",
 ]
