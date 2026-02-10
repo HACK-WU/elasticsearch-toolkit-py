@@ -106,6 +106,14 @@ from elasticflow.time_range import (
     QuickTimeRange,
 )
 
+# 导出地理位置查询工具
+from elasticflow.geo import (
+    GeoQueryTool,
+    GeoPoint,
+    GeoBounds,
+    GeoDistanceUnit,
+)
+
 __all__ = [
     # 版本
     "__version__",
@@ -177,4 +185,9 @@ __all__ = [
     "TimeRange",
     "TimeRangeType",
     "QuickTimeRange",
+    # 地理位置查询工具
+    "GeoQueryTool",
+    "GeoPoint",
+    "GeoBounds",
+    "GeoDistanceUnit",
 ]
