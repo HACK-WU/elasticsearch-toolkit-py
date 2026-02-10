@@ -46,6 +46,23 @@ from .models import (
     IndexMappings,
 )
 from .tool import IndexManager
+from .policies import (
+    IndexPolicyManager,
+    TimeBasedRolloverPolicy,
+    SizeBasedRolloverPolicy,
+    LifecyclePhase,
+    IndexLifecyclePolicy,
+    ShrinkPolicy,
+    ArchivePolicy,
+    CleanupPolicy,
+    PolicyError,
+    PolicyValidationError,
+    PolicyExecutionError,
+    PolicyNotFoundError,
+    validate_time_format,
+    validate_size_format,
+    parse_time_to_seconds,
+)
 
 __all__ = [
     # 核心类
@@ -70,4 +87,23 @@ __all__ = [
     "TemplateNotFoundError",
     "ILMNotFoundError",
     "RolloverError",
+    # 策略管理器
+    "IndexPolicyManager",
+    # 策略模型
+    "TimeBasedRolloverPolicy",
+    "SizeBasedRolloverPolicy",
+    "LifecyclePhase",
+    "IndexLifecyclePolicy",
+    "ShrinkPolicy",
+    "ArchivePolicy",
+    "CleanupPolicy",
+    # 策略异常类
+    "PolicyError",
+    "PolicyValidationError",
+    "PolicyExecutionError",
+    "PolicyNotFoundError",
+    # 策略工具函数
+    "validate_time_format",
+    "validate_size_format",
+    "parse_time_to_seconds",
 ]

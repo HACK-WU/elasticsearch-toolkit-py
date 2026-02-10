@@ -153,6 +153,345 @@ es_query_toolkit/
 - 索引滚动（rollover）
 - 索引模板管理
 
+#### 10.3.1 内置索引管理策略
+
+以下提供几种常用的索引管理策略，用于自动化索引的生命周期管理：
+
+##### 1. 基于时间的滚动策略（TimeBasedRolloverPolicy）
+
+**职责**：根据时间间隔自动滚动索引
+
+**适用场景**：
+- 日志索引按天/周/月滚动
+- 时间序列数据的周期性归档
+- 避免单索引过大
+
+**策略参数**：
+```python
+@dataclass
+class TimeBasedRolloverPolicy:
+    """基于时间的滚动策略"""
+    interval: str                  # 滚动间隔，如 "1d", "1w", "1M"
+    max_age: str                   # 最大保存时间，如 "30d", "90d"
+    alias: str                     # 索引别名
+    index_pattern: str             # 索引命名模式，如 "logs-{now/d}"
+    include_aliases: bool = True   # 是否在滚动时保留别名
+```
+
+**使用示例**：
+```python
+policy = TimeBasedRolloverPolicy(
+    interval="1d",                 # 每天滚动一次
+    max_age="30d",                 # 保留30天
+    alias="logs",                  # 读写别名
+    index_pattern="logs-{now/d}",  # 索引命名模式
+)
+
+# 应用策略
+index_manager.apply_rollover_policy(policy)
+```
+
+---
+
+##### 2. 基于大小的滚动策略（SizeBasedRolloverPolicy）
+
+**职责**：根据索引大小自动滚动索引
+
+**适用场景**：
+- 大数据量索引的分片管理
+- 防止单索引超过磁盘限制
+- 优化查询性能（避免单索引过大）
+
+**策略参数**：
+```python
+@dataclass
+class SizeBasedRolloverPolicy:
+    """基于大小的滚动策略"""
+    max_size: str                  # 最大索引大小，如 "10GB", "1TB"
+    max_docs: int                  # 最大文档数
+    alias: str                     # 索引别名
+    index_prefix: str              # 索引前缀，如 "logs-"
+    max_age: Optional[str] = None  # 可选：最大保存时间
+```
+
+**使用示例**：
+```python
+policy = SizeBasedRolloverPolicy(
+    max_size="10GB",               # 达到10GB时滚动
+    max_docs=10000000,             # 达到1000万文档时滚动
+    alias="logs",
+    index_prefix="logs-",
+    max_age="90d",                 # 可选：保留90天
+)
+
+# 应用策略
+index_manager.apply_rollover_policy(policy)
+```
+
+---
+
+##### 3. 索引生命周期管理策略（IndexLifecyclePolicy）
+
+**职责**：基于 ILM (Index Lifecycle Management) 实现索引全生命周期管理
+
+**适用场景**：
+- 自动化索引热温冷阶段管理
+- 自动归档和删除旧索引
+- 优化存储成本
+
+**策略阶段**：
+- **Hot**：高频写入和查询
+- **Warm**：只读查询，可降低分片数
+- **Cold**：长期存储，可降副本
+- **Delete**：自动删除
+
+**策略参数**：
+```python
+@dataclass
+class LifecyclePhase:
+    """生命周期阶段配置"""
+    name: str                      # 阶段名称：hot, warm, cold, delete
+    min_age: str                   # 进入该阶段的最小时间
+    actions: Dict[str, Any]        # 阶段动作配置
+
+
+@dataclass
+class IndexLifecyclePolicy:
+    """索引生命周期管理策略"""
+    name: str                      # 策略名称
+    hot_phase: LifecyclePhase      # 热阶段配置
+    warm_phase: Optional[LifecyclePhase] = None   # 温阶段配置
+    cold_phase: Optional[LifecyclePhase] = None  # 冷阶段配置
+    delete_phase: Optional[LifecyclePhase] = None # 删除阶段配置
+```
+
+**使用示例**：
+```python
+policy = IndexLifecyclePolicy(
+    name="logs_policy",
+    hot_phase=LifecyclePhase(
+        name="hot",
+        min_age="0ms",
+        actions={
+            "rollover": {
+                "max_size": "10GB",
+                "max_age": "1d",
+                "max_docs": 1000000
+            }
+        }
+    ),
+    warm_phase=LifecyclePhase(
+        name="warm",
+        min_age="7d",
+        actions={
+            "forcemerge": {"max_num_segments": 1},
+            "shrink": {"number_of_shards": 1},
+        }
+    ),
+    cold_phase=LifecyclePhase(
+        name="cold",
+        min_age="30d",
+        actions={
+            "allocate": {"number_of_replicas": 0},
+        }
+    ),
+    delete_phase=LifecyclePhase(
+        name="delete",
+        min_age="90d",
+        actions={"delete": {}}
+    ),
+)
+
+# 应用 ILM 策略
+index_manager.create_lifecycle_policy(policy)
+index_manager.apply_lifecycle_policy(index_pattern="logs-*", policy_name="logs_policy")
+```
+
+---
+
+##### 4. 索引压缩策略（ShrinkPolicy）
+
+**职责**：减少索引的分片数，降低资源占用
+
+**适用场景**：
+- 将大索引压缩为小索引
+- 降低查询开销
+- 释放分片资源
+
+**策略参数**：
+```python
+@dataclass
+class ShrinkPolicy:
+    """索引压缩策略"""
+    source_index: str              # 源索引名
+    target_index: str              # 目标索引名
+    target_shards: int             # 目标分片数
+    force_merge: bool = True       # 是否在压缩前强制合并段
+    copy_settings: bool = True     # 是否复制索引设置
+```
+
+**使用示例**：
+```python
+policy = ShrinkPolicy(
+    source_index="logs-2024-01-01",
+    target_index="logs-2024-01-01-shrunk",
+    target_shards=1,               # 压缩为1个分片
+    force_merge=True,
+)
+
+# 执行压缩
+index_manager.apply_shrink_policy(policy)
+```
+
+---
+
+##### 5. 索引归档策略（ArchivePolicy）
+
+**职责**：将不再频繁查询的索引归档，释放存储空间
+
+**适用场景**：
+- 历史数据归档
+- 降低存储成本
+- 保留数据但降低可用性
+
+**策略参数**：
+```python
+@dataclass
+class ArchivePolicy:
+    """索引归档策略"""
+    source_index: str              # 源索引名
+    archive_index: str             # 归档索引名
+    compress: bool = True          # 是否压缩数据
+    reduce_replicas: int = 0       # 归档后副本数
+    delete_source: bool = True     # 是否删除源索引
+```
+
+**使用示例**：
+```python
+policy = ArchivePolicy(
+    source_index="logs-2023-12-01",
+    archive_index="archive-logs-2023-12-01",
+    compress=True,
+    reduce_replicas=0,             # 归档后不保留副本
+    delete_source=True,            # 归档后删除源索引
+)
+
+# 执行归档
+index_manager.apply_archive_policy(policy)
+```
+
+---
+
+##### 6. 索引清理策略（CleanupPolicy）
+
+**职责**：定期清理过期或无用的索引
+
+**适用场景**：
+- 自动清理过期索引
+- 清理测试/临时索引
+- 定期释放存储空间
+
+**策略参数**：
+```python
+from typing import Callable, Optional
+
+
+@dataclass
+class CleanupPolicy:
+    """索引清理策略"""
+    index_pattern: str             # 索引模式，如 "logs-*"
+    max_age: str                   # 最大保留时间，如 "30d"
+    min_age: Optional[str] = None  # 最小保留时间（可选）
+    dry_run: bool = False          # 是否为试运行（不实际删除）
+    filter_func: Optional[Callable[[Dict], bool]] = None  # 自定义过滤函数
+```
+
+**使用示例**：
+```python
+# 基础清理策略
+policy = CleanupPolicy(
+    index_pattern="logs-*",
+    max_age="30d",                 # 删除超过30天的索引
+)
+
+# 自定义过滤策略
+def custom_filter(index_info: Dict) -> bool:
+    """自定义过滤函数：只删除 size 小于 1GB 的索引"""
+    return index_info.get('size_in_bytes', 0) < 1024 * 1024 * 1024
+
+policy = CleanupPolicy(
+    index_pattern="test-*",
+    max_age="7d",
+    filter_func=custom_filter,
+    dry_run=True,                  # 先试运行查看会删除哪些索引
+)
+
+# 执行清理
+result = index_manager.apply_cleanup_policy(policy)
+print(f"清理了 {result['deleted_count']} 个索引")
+```
+
+---
+
+**策略管理器接口**：
+
+```python
+class IndexPolicyManager:
+    """索引策略管理器"""
+    
+    def __init__(self, index_manager: 'IndexManager'):
+        self._manager = index_manager
+        self._policies: Dict[str, Any] = {}
+    
+    def register_policy(self, name: str, policy: Any) -> 'IndexPolicyManager':
+        """注册策略"""
+        self._policies[name] = policy
+        return self
+    
+    def apply_policy(self, name: str, **kwargs) -> Dict[str, Any]:
+        """应用指定策略"""
+        if name not in self._policies:
+            raise ValueError(f"Policy not found: {name}")
+        
+        policy = self._policies[name]
+        
+        if isinstance(policy, TimeBasedRolloverPolicy):
+            return self._manager.apply_time_based_rollover(policy, **kwargs)
+        elif isinstance(policy, SizeBasedRolloverPolicy):
+            return self._manager.apply_size_based_rollover(policy, **kwargs)
+        elif isinstance(policy, IndexLifecyclePolicy):
+            return self._manager.apply_lifecycle_policy(policy, **kwargs)
+        elif isinstance(policy, ShrinkPolicy):
+            return self._manager.apply_shrink_policy(policy, **kwargs)
+        elif isinstance(policy, ArchivePolicy):
+            return self._manager.apply_archive_policy(policy, **kwargs)
+        elif isinstance(policy, CleanupPolicy):
+            return self._manager.apply_cleanup_policy(policy, **kwargs)
+        else:
+            raise ValueError(f"Unsupported policy type: {type(policy)}")
+    
+    def apply_all_policies(self) -> Dict[str, Any]:
+        """应用所有已注册的策略"""
+        results = {}
+        for name, policy in self._policies.items():
+            try:
+                results[name] = self.apply_policy(name)
+            except Exception as e:
+                results[name] = {'error': str(e)}
+        return results
+    
+    def list_policies(self) -> List[str]:
+        """列出所有已注册的策略"""
+        return list(self._policies.keys())
+    
+    def remove_policy(self, name: str) -> 'IndexPolicyManager':
+        """移除策略"""
+        self._policies.pop(name, None)
+        return self
+```
+
+---
+
 ### 10.4 查询分析器（QueryAnalyzer）（已完成）
 
 **职责**：分析查询性能，提供优化建议
@@ -173,7 +512,7 @@ es_query_toolkit/
 - 时间序列数据查询
 - 快速构建时间过滤条件
 
-### 10.6 地理位置查询工具（GeoQueryTool）
+### 10.6 地理位置查询工具（GeoQueryTool）(已实现)
 
 **职责**：简化地理位置相关查询的构建
 
@@ -182,290 +521,6 @@ es_query_toolkit/
 - 区域内搜索
 - 距离计算
 - 地理位置聚合
-
-#### 10.6.1 类设计
-
-```python
-from typing import Dict, List, Tuple, Optional
-from dataclasses import dataclass
-from enum import Enum
-
-
-class GeoDistanceUnit(str, Enum):
-    """距离单位"""
-    METERS = "m"
-    KILOMETERS = "km"
-    MILES = "mi"
-    YARDS = "yd"
-
-
-@dataclass
-class GeoPoint:
-    """地理坐标点"""
-    lat: float  # 纬度
-    lon: float  # 经度
-    
-    def to_es_format(self) -> Dict[str, float]:
-        """转换为 ES 格式"""
-        return {"lat": self.lat, "lon": self.lon}
-    
-    def to_string(self) -> str:
-        """转换为字符串格式 "lat,lon" """
-        return f"{self.lat},{self.lon}"
-
-
-@dataclass
-class GeoBounds:
-    """地理边界框"""
-    top_left: GeoPoint
-    bottom_right: GeoPoint
-    
-    def to_es_format(self) -> Dict[str, List[float]]:
-        """转换为 ES 格式"""
-        return {
-            "top_left": [self.top_left.lon, self.top_left.lat],
-            "bottom_right": [self.bottom_right.lon, self.bottom_right.lat],
-        }
-
-
-class GeoQueryTool:
-    """
-    地理位置查询工具
-    
-    功能:
-    - 地理距离查询
-    - 地理边界框查询
-    - 地理形状查询
-    - 距离聚合
-    """
-    
-    def __init__(self, geo_field: str = "location"):
-        """
-        初始化地理查询工具
-        
-        Args:
-            geo_field: 地理位置字段名（geo_point 类型）
-        """
-        self.geo_field = geo_field
-    
-    def geo_distance_query(
-        self,
-        center: GeoPoint,
-        distance: float,
-        unit: GeoDistanceUnit = GeoDistanceUnit.KILOMETERS,
-        distance_type: str = "arc",  # arc, plane
-    ) -> Dict:
-        """
-        地理距离查询
-        
-        Args:
-            center: 中心点
-            distance: 距离
-            unit: 距离单位
-            distance_type: 距离计算类型
-            
-        Returns:
-            查询 DSL
-        """
-        return {
-            "geo_distance": {
-                "distance": f"{distance}{unit.value}",
-                "distance_type": distance_type,
-                self.geo_field: center.to_es_format(),
-            }
-        }
-    
-    def geo_bounding_box_query(
-        self,
-        bounds: GeoBounds,
-    ) -> Dict:
-        """
-        地理边界框查询
-        
-        Args:
-            bounds: 边界框
-            
-        Returns:
-            查询 DSL
-        """
-        return {
-            "geo_bounding_box": {
-                self.geo_field: bounds.to_es_format(),
-            }
-        }
-    
-    def geo_polygon_query(
-        self,
-        points: List[GeoPoint],
-    ) -> Dict:
-        """
-        地理多边形查询
-        
-        Args:
-            points: 多边形顶点列表（按顺序）
-            
-        Returns:
-            查询 DSL
-        """
-        return {
-            "geo_polygon": {
-                self.geo_field: {
-                    "points": [[p.lon, p.lat] for p in points],
-                }
-            }
-        }
-    
-    def geo_distance_sort(
-        self,
-        center: GeoPoint,
-        unit: GeoDistanceUnit = GeoDistanceUnit.KILOMETERS,
-        order: str = "asc",
-    ) -> Dict:
-        """
-        地理距离排序
-        
-        Args:
-            center: 中心点
-            unit: 距离单位
-            order: 排序顺序
-            
-        Returns:
-            排序 DSL
-        """
-        return {
-            "_geo_distance": {
-                self.geo_field: center.to_es_format(),
-                "unit": unit.value,
-                "order": order,
-                "distance_type": "arc",
-            }
-        }
-    
-    def geo_distance_aggregation(
-        self,
-        name: str,
-        center: GeoPoint,
-        ranges: List[Dict[str, float]],
-        unit: GeoDistanceUnit = GeoDistanceUnit.KILOMETERS,
-    ) -> Dict:
-        """
-        地理距离聚合
-        
-        Args:
-            name: 聚合名称
-            center: 中心点
-            ranges: 距离范围列表 [{"to": 10}, {"from": 10, "to": 50}, {"from": 50}]
-            unit: 距离单位
-            
-        Returns:
-            聚合 DSL
-        """
-        return {
-            name: {
-                "geo_distance": {
-                    "field": self.geo_field,
-                    "origin": center.to_es_format(),
-                    "unit": unit.value,
-                    "ranges": ranges,
-                }
-            }
-        }
-    
-    def geo_bounds_aggregation(
-        self,
-        name: str,
-    ) -> Dict:
-        """
-        地理边界聚合
-        
-        Args:
-            name: 聚合名称
-            
-        Returns:
-            聚合 DSL
-        """
-        return {
-            name: {
-                "geo_bounds": {
-                    "field": self.geo_field,
-                }
-            }
-        }
-    
-    def geo_centroid_aggregation(
-        self,
-        name: str,
-    ) -> Dict:
-        """
-        地理中心聚合
-        
-        Args:
-            name: 聚合名称
-            
-        Returns:
-            聚合 DSL
-        """
-        return {
-            name: {
-                "geo_centroid": {
-                    "field": self.geo_field,
-                }
-            }
-        }
-```
-
-#### 10.6.2 使用示例
-
-```python
-from elasticflow.geo import GeoQueryTool, GeoPoint, GeoBounds, GeoDistanceUnit
-from elasticsearch.dsl import Q, A
-
-# 创建地理查询工具
-geo_tool = GeoQueryTool(geo_field="location")
-
-# 查询附近5公里内的地点
-center = GeoPoint(lat=39.9042, lon=116.4074)  # 北京
-query = geo_tool.geo_distance_query(
-    center=center,
-    distance=5,
-    unit=GeoDistanceUnit.KILOMETERS,
-)
-
-# 使用 DslQueryBuilder
-builder = DslQueryBuilder(search_factory=lambda: Search(index="places"))
-search = (
-    builder
-    .add_filter(Q(query))
-    .add_sort(geo_tool.geo_distance_sort(center))
-    .build()
-)
-
-# 边界框查询
-bounds = GeoBounds(
-    top_left=GeoPoint(lat=40.0, lon=116.0),
-    bottom_right=GeoPoint(lat=39.8, lon=116.5),
-)
-query = geo_tool.geo_bounding_box_query(bounds)
-
-# 距离聚合
-search = (
-    builder
-    .add_filter(Q(query))
-    .add_aggregation_raw(
-        geo_tool.geo_distance_aggregation(
-            name="distance_ranges",
-            center=center,
-            ranges=[
-                {"to": 1},
-                {"from": 1, "to": 5},
-                {"from": 5, "to": 10},
-                {"from": 10},
-            ],
-        )
-    )
-    .build()
-)
-```
 
 ---
 
@@ -476,9 +531,20 @@ search = (
 **职责**：统一管理 Elasticsearch 客户端的创建、连接池配置和生命周期
 
 **适用场景**：
-- 多集群环境（主备集群、读写分离）
-- 需要连接池管理和超时配置
-- 需要重试策略
+- **基础连接**：多集群环境（主备集群、读写分离）
+- **基础连接**：连接池管理和超时配置
+- **基础连接**：重试策略
+- **生命周期管理**：上下文管理器（优雅创建/关闭）
+- **生命周期管理**：连接预热
+- **高可用**：集群健康检查
+- **高可用**：自动故障转移
+- **认证方式**：多认证方式（Basic/API Key/Bearer/mTLS）
+- **认证方式**：AWS IAM / 自定义认证插件
+- **模块集成**：与已有模块统一客户端提供
+- **可观测性**：连接池状态监控
+- **可观测性**：请求中间件/拦截器
+- **运维**：配置热更新/动态调整连接池
+- **兼容性**：多版本 ES 兼容/版本探测
 
 **依赖库**：`elasticsearch>=7.0.0`
 
@@ -2255,7 +2321,15 @@ es_query_toolkit/
 │
 ├── managers/                      # 索引管理
 │   ├── __init__.py
-│   └── index.py                   # IndexManager
+│   ├── index.py                   # IndexManager
+│   ├── policies.py                # 索引策略管理器
+│   └── policies/                  # 内置索引策略
+│       ├── __init__.py
+│       ├── rollover.py            # 滚动策略
+│       ├── lifecycle.py           # 生命周期管理策略
+│       ├── shrink.py              # 压缩策略
+│       ├── archive.py             # 归档策略
+│       └── cleanup.py             # 清理策略
 │
 ├── analyzers/                     # 查询分析
 │   ├── __init__.py
@@ -2287,7 +2361,7 @@ es_query_toolkit/
 │   ├── validator.py               # QueryValidator
 │   └── secure_builder.py          # SecureQueryBuilder
 │
-├── async_Executor/               # 异步支持（新增）
+├── async_executor/               # 异步支持（新增）
 │   ├── __init__.py
 │   └── executor.py                # AsyncExecutor
 │
@@ -2312,6 +2386,7 @@ es_query_toolkit/
 | v0.2.0 | 添加 QueryStringTransformer |
 | v0.3.0 | 添加 ResponseParser, BulkOperationTool |
 | v0.4.0 | 添加 IndexManager, TimeRangeQueryTool |
+| v0.4.5 | 添加 IndexManager 内置策略（滚动、生命周期、压缩、归档、清理） |
 | v0.5.0 | 添加 QueryAnalyzer, GeoQueryTool |
 | v0.6.0 | 添加 ESClientFactory, ConfigLoader, QueryCache |
 | v0.7.0 | 添加 ScrollQueryBuilder, MultiSearchBuilder |
@@ -2335,7 +2410,6 @@ es_query_toolkit/
 ---
 
 ### 10.7 扩展模块架构
-
 
 添加扩展功能后的模块架构：
 
@@ -2361,7 +2435,15 @@ es_query_toolkit/
 │
 ├── managers/                      # 索引管理
 │   ├── __init__.py
-│   └── index.py                   # IndexManager
+│   ├── index.py                   # IndexManager
+│   ├── policies.py                # 索引策略管理器
+│   └── policies/                  # 内置索引策略
+│       ├── __init__.py
+│       ├── rollover.py            # 滚动策略
+│       ├── lifecycle.py           # 生命周期管理策略
+│       ├── shrink.py              # 压缩策略
+│       ├── archive.py             # 归档策略
+│       └── cleanup.py             # 清理策略
 │
 ├── analyzers/                     # 查询分析
 │   ├── __init__.py
