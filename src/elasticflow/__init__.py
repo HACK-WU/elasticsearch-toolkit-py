@@ -114,6 +114,18 @@ from elasticflow.geo import (
     GeoDistanceUnit,
 )
 
+# 导出客户端工厂
+from elasticflow.connection import (
+    ESClientFactory,
+    ClusterConfig,
+    ConnectionConfig,
+    ClusterRole,
+    ESClientFactoryError,
+    ConnectionConfigError,
+    ClusterNotFoundError,
+    HealthCheckError,
+)
+
 __all__ = [
     # 版本
     "__version__",
@@ -190,4 +202,13 @@ __all__ = [
     "GeoPoint",
     "GeoBounds",
     "GeoDistanceUnit",
+    # 客户端工厂
+    "ESClientFactory",
+    "ClusterConfig",
+    "ConnectionConfig",
+    "ClusterRole",
+    "ESClientFactoryError",
+    "ConnectionConfigError",
+    "ClusterNotFoundError",
+    "HealthCheckError",
 ]
