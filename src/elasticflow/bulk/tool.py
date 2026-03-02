@@ -5,7 +5,7 @@ import logging
 from typing import Any
 from collections.abc import Callable, Iterable
 from elasticsearch import Elasticsearch
-from elasticsearch.helpers import bulk
+from elasticsearch.helpers import streaming_bulk
 from elasticsearch.exceptions import TransportError
 
 from .models import BulkAction, BulkOperation, BulkResult, BulkErrorItem
@@ -130,12 +130,12 @@ class BulkOperationTool:
                 errors = []
                 successes = []
 
-                for ok, info in bulk(
+                for ok, info in streaming_bulk(
                     self.es_client,
                     actions,
                     raise_on_exception=False,
                     raise_on_error=False,
-                    stats_only=False,
+                    chunk_size=len(actions),
                 ):
                     if ok:
                         success_count += 1

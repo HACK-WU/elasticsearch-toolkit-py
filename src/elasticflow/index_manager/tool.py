@@ -1192,16 +1192,14 @@ class IndexManager:
             >>> manager.create_ilm_policy("logs_policy", phases)
         """
         try:
-            body: dict[str, Any] = {
-                "policy": {"phases": phases},
-            }
+            policy_body: dict[str, Any] = {"phases": phases}
 
             if version is not None:
-                body["policy"]["version"] = version
+                policy_body["version"] = version
 
             response = self.es_client.ilm.put_lifecycle(
-                policy=policy_name,
-                body=body,
+                name=policy_name,
+                policy=policy_body,
             )
             acknowledged = response.get("acknowledged", False)
             if acknowledged:
@@ -1306,7 +1304,7 @@ class IndexManager:
             ...     print(policy.phases)
         """
         try:
-            response = self.es_client.ilm.get_lifecycle(policy=policy_name)
+            response = self.es_client.ilm.get_lifecycle(name=policy_name)
             policy_data = response.get(policy_name, {})
             policy_obj = policy_data.get("policy", {})
 
@@ -1349,7 +1347,7 @@ class IndexManager:
             >>> manager.delete_ilm_policy("logs_policy")
         """
         try:
-            response = self.es_client.ilm.delete_lifecycle(policy=policy_name)
+            response = self.es_client.ilm.delete_lifecycle(name=policy_name)
             acknowledged = response.get("acknowledged", False)
             if acknowledged:
                 logger.info(f"ILM策略 '{policy_name}' 删除成功")
