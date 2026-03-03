@@ -59,7 +59,7 @@ from elasticflow import (
 # ============================================================
 # 配置
 # ============================================================
-ES_HOST = "http://21.91.146.126:9200"
+ES_HOST = "http://localhost:9200"
 ES_USER = "elastic"
 ES_PASS = "kORpAZR8e3UKDD4r4dKe"
 
